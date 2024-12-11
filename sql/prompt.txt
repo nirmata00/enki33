@@ -1,0 +1,64 @@
+Cada vez que cree una transacción, puede ser externa (ingresos o egresos de mis cuentas) o interna (transferencias entre mis cuentas).
+
+Deben ir los siguientes datos:
+
+Tipo: Ingreso, Egreso o Transferencia entre cuentas
+Fecha registro: Fecha y hora actual del sistema
+Fecha transacción: Fecha y hora de la transacción
+Monto
+Moneda: Por defecto pesos mexicanos
+Medio de transacción: Efectivo, Tarjeta de crédito, tarjeta de débito, Interna (transferencia entre mis cuentas)
+Cuenta origen: Cuenta origen de la transacción
+Cuenta destino: Cuenta destino de la transacción (Sólo se habilitará si es una transferencia)
+Descripción: Descripción de la transacción
+Categoría: Categoría de la transacción
+Subcategoría: Subcategoría de la transacción
+Referencia: Referencia de la transacción (opcional)
+Organización: Personal (transacciones propias) o Empresa (transacciones de la empresa)
+
+Para cada transacción se debe ubicar en un periodo, y se sumará o restará del presupuesto calculado para el periodo.
+
+El presupuesto de cada periodo se tiene que dividir de esta forma:
+
+1. Necesidades Básicas (NEC) – 55%
+Propósito: Cubrir los gastos esenciales de tu vida diaria.
+Incluye: Alquiler/hipoteca, comida, transporte, servicios públicos, seguros, etc.
+Porcentaje: 55% de tus ingresos.
+Consejo: Si tus necesidades básicas superan este porcentaje, busca formas de reducir gastos o aumentar tus ingresos.
+2. Diversión y Ocio (PLAY) – 10%
+Propósito: Gastar en cosas que te hagan feliz y te permitan disfrutar la vida.
+Incluye: Salidas, cenas, entretenimiento, hobbies, viajes, etc.
+Porcentaje: 10% de tus ingresos.
+Consejo: Este frasco es importante porque te ayuda a mantener una mentalidad de abundancia. ¡Gástalo sin culpa!
+3. Ahorros a Largo Plazo (LTSS) – 10%
+Propósito: Ahorrar para metas a largo plazo o emergencias.
+Incluye: Comprar una casa, un coche, vacaciones grandes, fondo de emergencia, etc.
+Porcentaje: 10% de tus ingresos.
+Consejo: Este dinero no debe tocarse a menos que sea para el propósito específico para el que fue ahorrado.
+4. Educación Financiera y Personal (EDU) – 10%
+Propósito: Invertir en tu crecimiento personal y profesional.
+Incluye: Cursos, libros, seminarios, talleres, coaching, etc.
+Porcentaje: 10% de tus ingresos.
+Consejo: Eker enfatiza que el aprendizaje continuo es clave para atraer más dinero y mejorar tus habilidades.
+5. Inversiones y Libertad Financiera (FFA) – 10%
+Propósito: Crear ingresos pasivos e invertir para tu libertad financiera.
+Incluye: Inversiones en acciones, bienes raíces, negocios, fondos de inversión, etc.
+Porcentaje: 10% de tus ingresos.
+Consejo: Este frasco nunca debe gastarse; solo se utiliza para generar más dinero. Es el "fondo de la gallina de los huevos de oro".
+6. Donaciones y Contribuciones (GIVE) – 5%
+Propósito: Compartir tu riqueza y contribuir al bienestar de los demás.
+Incluye: Donaciones a caridad, regalos, ayuda a familiares o amigos, etc.
+Porcentaje: 5% de tus ingresos.
+Consejo: Dar genera una mentalidad de abundancia y gratitud, lo que, según Eker, atrae más riqueza.
+
+Y cada ingreso se debe sumar al periodo en el que fue registrado y se calcularán los porcentajes mencionados anteriormente.
+
+Cada transacción se debe registrar en un periodo, y se debe poder visualizar el estado de cada periodo en cuanto a ingresos, egresos, presupuesto, saldo, etc.
+
+Cada egreso de debe resgistrar en el periodo en el que fue realizado., y restado del presupuesto calculado para el periodo.
+
+
+Cada transferencia entre cuentas se debe registrar en el periodo en el que fue realizado., y se debe restar del presupuesto calculado para el periodo de la cuenta de origen y se debe sumar al presupuesto calculado para el periodo de la cuenta de destino.
+
+
+Con las tablas y relaciones que te compartí con el script, revisa si se deben agregar o modificar más tablas o relaciones para poder llevar a cabo lo anterior.
