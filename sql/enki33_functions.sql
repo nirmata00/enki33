@@ -209,63 +209,7 @@ CREATE TRIGGER trigger_refresh_period_summary
 
 -- 4. Datos Iniciales  
 -- Datos iniciales para account_type  
-INSERT INTO public.account_type (name, code, description, requires_payment_info) VALUES  
-('Cuenta de Débito', 'DEBIT', 'Cuenta bancaria regular', false),  
-('Tarjeta de Crédito', 'CREDIT_CARD', 'Tarjeta de crédito con fecha de corte y pago', true),  
-('Préstamo', 'LOAN', 'Préstamo con pagos mensuales', true),  
-('Cuenta de Ahorro', 'SAVINGS', 'Cuenta para ahorros', false),  
-('Inversión', 'INVESTMENT', 'Cuenta de inversiones', false),  
-('Efectivo', 'CASH', 'Dinero en efectivo', false);  
 
--- Datos iniciales para budget_jar  
-INSERT INTO public.budget_jar (code, name, description, percentage) VALUES  
-('NEC', 'Necesidades Básicas', 'Gastos esenciales de vida diaria', 55),  
-('PLAY', 'Diversión y Ocio', 'Entretenimiento y disfrute', 10),  
-('LTSS', 'Ahorros a Largo Plazo', 'Metas a largo plazo y emergencias', 10),  
-('EDU', 'Educación Financiera', 'Inversión en crecimiento personal', 10),  
-('FFA', 'Inversiones', 'Libertad financiera', 10),  
-('GIVE', 'Donaciones', 'Contribuciones y ayuda', 5);  
-
--- Datos iniciales para transaction_type  
-INSERT INTO public.transaction_type (name, description) VALUES  
-('INGRESO', 'Entrada de dinero'),  
-('EGRESO', 'Salida de dinero'),  
-('TRANSFERENCIA', 'Movimiento entre cuentas');  
-
--- Datos iniciales para transaction_medium  
-INSERT INTO public.transaction_medium (name, description) VALUES  
-('EFECTIVO', 'Pago en efectivo'),  
-('TARJETA_CREDITO', 'Pago con tarjeta de crédito'),  
-('TARJETA_DEBITO', 'Pago con tarjeta de débito'),  
-('INTERNA', 'Transferencia interna entre cuentas');  
-
-CREATE OR REPLACE FUNCTION public.record_balance_change()
-RETURNS TRIGGER AS $$
-BEGIN
-    INSERT INTO public.account_balance_history (
-        account_id,
-        previous_balance,
-        new_balance,
-        change_amount,
-        transaction_id,
-        transfer_id,
-        change_type,
-        changed_by,
-        notes
-    ) VALUES (
-        NEW.id,
-        OLD.balance,
-        NEW.balance,
-        NEW.balance - OLD.balance,
-        NULL, -- Se actualizará mediante triggers específicos
-        NULL, -- Se actualizará mediante triggers específicos
-        'ADJUSTMENT', -- Valor por defecto, se actualizará mediante triggers específicos
-        current_user::uuid, -- Asume que current_user es un UUID válido
-        'Balance update'
-    );
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
 
 -- 4. Crear trigger para cambios en saldos de cuenta
 CREATE TRIGGER track_balance_changes
@@ -328,3 +272,191 @@ CREATE TRIGGER track_transaction_balance_changes
 AFTER INSERT ON public.transaction
 FOR EACH ROW
 EXECUTE FUNCTION public.record_transaction_balance_change();
+
+
+-- Trigger function para mantener el histórico de cambios en subcategorías
+CREATE OR REPLACE FUNCTION public.track_subcategory_changes()
+RETURNS TRIGGER AS $
+BEGIN
+    IF (OLD.category_id != NEW.category_id OR OLD.budget_jar_id != NEW.budget_jar_id) THEN
+        INSERT INTO public.sub_category_history (
+            sub_category_id,
+            old_category_id,
+            new_category_id,
+            old_budget_jar_id,
+            new_budget_jar_id,
+            change_type
+        ) VALUES (
+            NEW.id,
+            OLD.category_id,
+            NEW.category_id,
+            OLD.budget_jar_id,
+            NEW.budget_jar_id,
+            CASE 
+                WHEN OLD.category_id != NEW.category_id AND OLD.budget_jar_id != NEW.budget_jar_id THEN 'BOTH'
+                WHEN OLD.category_id != NEW.category_id THEN 'CATEGORY_CHANGE'
+                ELSE 'JAR_CHANGE'
+            END
+        );
+    END IF;
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+-- Trigger para actualizar presupuestos cuando cambia el ingreso del período
+CREATE OR REPLACE FUNCTION update_jar_budgets_for_period()
+RETURNS TRIGGER AS $
+BEGIN
+    -- Actualizar o insertar presupuestos para cada jarra
+    INSERT INTO public.jar_period_budget (period_id, budget_jar_id, calculated_amount)
+    SELECT 
+        NEW.period_id,
+        bj.id,
+        (NEW.total_income * (bj.percentage / 100))::numeric(15,2)
+    FROM public.budget_jar bj
+    ON CONFLICT (period_id, budget_jar_id) 
+    DO UPDATE SET 
+        calculated_amount = (NEW.total_income * (budget_jar.percentage / 100))::numeric(15,2);
+    
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+-- Crear triggers
+CREATE TRIGGER track_subcategory_changes_trigger
+AFTER UPDATE ON public.sub_category
+FOR EACH ROW
+EXECUTE FUNCTION public.track_subcategory_changes();
+
+CREATE TRIGGER update_jar_budgets_trigger
+AFTER INSERT OR UPDATE ON public.period_income
+FOR EACH ROW
+EXECUTE FUNCTION update_jar_budgets_for_period();
+
+CREATE OR REPLACE FUNCTION check_period_status()
+RETURNS TRIGGER AS $
+DECLARE
+    v_period_id uuid;
+    v_is_closed boolean;
+BEGIN
+    -- Obtener el período correspondiente a la fecha de la transacción
+    SELECT id, is_closed INTO v_period_id, v_is_closed
+    FROM public.period
+    WHERE NEW.date BETWEEN from_date AND to_date;
+
+    IF v_is_closed THEN
+        RAISE EXCEPTION 'No se pueden modificar transacciones en un período cerrado';
+    END IF;
+
+    -- Asignar automáticamente la transacción al período
+    INSERT INTO public.transaction_period (transaction, period)
+    VALUES (NEW.id, v_period_id);
+
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+CREATE TRIGGER check_period_status_trigger
+AFTER INSERT OR UPDATE ON public.transaction
+FOR EACH ROW
+EXECUTE FUNCTION check_period_status();
+
+CREATE OR REPLACE FUNCTION validate_jar_budget()
+RETURNS TRIGGER AS $
+DECLARE
+    v_jar_id uuid;
+    v_period_id uuid;
+    v_budget numeric(15,2);
+    v_spent numeric(15,2);
+BEGIN
+    -- Solo validar gastos
+    IF NOT NEW.is_expense THEN
+        RETURN NEW;
+    END IF;
+
+    -- Obtener la jarra de la subcategoría
+    SELECT budget_jar_id INTO v_jar_id
+    FROM public.sub_category
+    WHERE id = NEW.sub_category;
+
+    -- Obtener el período
+    SELECT id INTO v_period_id
+    FROM public.period
+    WHERE NEW.date BETWEEN from_date AND to_date;
+
+    -- Obtener presupuesto asignado
+    SELECT calculated_amount INTO v_budget
+    FROM public.jar_period_budget
+    WHERE budget_jar_id = v_jar_id AND period_id = v_period_id;
+
+    -- Calcular gastos actuales
+    SELECT COALESCE(SUM(t.amount), 0) INTO v_spent
+    FROM public.transaction t
+    JOIN public.sub_category sc ON t.sub_category = sc.id
+    WHERE sc.budget_jar_id = v_jar_id
+    AND t.is_expense = true
+    AND t.id != NEW.id
+    AND t.date BETWEEN (SELECT from_date FROM public.period WHERE id = v_period_id)
+                   AND (SELECT to_date FROM public.period WHERE id = v_period_id);
+
+    IF (v_spent + NEW.amount) > v_budget THEN
+        RAISE EXCEPTION 'El gasto excede el presupuesto disponible en la jarra. Disponible: %, Gasto: %', 
+            (v_budget - v_spent), NEW.amount;
+    END IF;
+
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+CREATE TRIGGER validate_jar_budget_trigger
+BEFORE INSERT OR UPDATE ON public.transaction
+FOR EACH ROW
+EXECUTE FUNCTION validate_jar_budget();
+
+CREATE OR REPLACE FUNCTION recalculate_period_totals(p_period_id uuid)
+RETURNS void AS $
+BEGIN
+    -- Actualizar period_income
+    INSERT INTO public.period_income (period_id, total_income)
+    SELECT 
+        p_period_id,
+        COALESCE(SUM(t.amount), 0) as total_income
+    FROM public.transaction t
+    JOIN public.transaction_period tp ON t.id = tp.transaction
+    WHERE tp.period = p_period_id
+    AND NOT t.is_expense
+    ON CONFLICT (period_id) 
+    DO UPDATE SET 
+        total_income = EXCLUDED.total_income,
+        modified_at = CURRENT_TIMESTAMP;
+
+    -- Refrescar vista materializada
+    REFRESH MATERIALIZED VIEW CONCURRENTLY public.period_summary;
+END;
+$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION validate_transfer_transaction()
+RETURNS TRIGGER AS $
+DECLARE
+    v_transfer_type_id uuid;
+BEGIN
+    -- Obtener ID del tipo de transacción 'TRANSFERENCIA'
+    SELECT id INTO v_transfer_type_id
+    FROM public.transaction_type
+    WHERE name = 'TRANSFERENCIA';
+
+    -- Validar que las transferencias tengan cuenta origen y destino
+    IF NEW.transaction_type = v_transfer_type_id THEN
+        IF NEW.transfer_account_id IS NULL THEN
+            RAISE EXCEPTION 'Las transferencias requieren una cuenta destino';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+CREATE TRIGGER validate_transfer_transaction_trigger
+BEFORE INSERT OR UPDATE ON public.transaction
+FOR EACH ROW
+EXECUTE FUNCTION validate_transfer_transaction();
