@@ -63,3 +63,71 @@ END $;
 SELECT name, percentage, description 
 FROM public.budget_jar 
 ORDER BY percentage DESC;
+
+
+-- Primero, crear la moneda undefined
+INSERT INTO public.currency (
+    code, 
+    name, 
+    symbol, 
+    is_active
+) VALUES (
+    'UND', 
+    'Undefined Currency', 
+    'UND',
+    true
+);
+
+-- Asegurar que existe la organización UNDEFINED
+INSERT INTO public.organization (code, name, description, is_active, user_id)
+VALUES (
+    'UND', 
+    'UNDEFINED', 
+    'Placeholder organization for maintaining data integrity',
+    true,
+    (SELECT id FROM public.app_user LIMIT 1)  -- Asignar a un usuario administrador
+)
+ON CONFLICT (code) DO NOTHING;
+
+-- Datos iniciales para frecuencias
+INSERT INTO public.recurrence_frequency 
+    (name, description, interval_value) 
+VALUES 
+    ('Diario', 'Se repite todos los días', interval '1 day'),
+    ('Semanal', 'Se repite cada semana', interval '1 week'),
+    ('Quincenal', 'Se repite cada 15 días', interval '15 days'),
+    ('Mensual', 'Se repite cada mes', interval '1 month'),
+    ('Bimestral', 'Se repite cada 2 meses', interval '2 months'),
+    ('Trimestral', 'Se repite cada 3 meses', interval '3 months'),
+    ('Semestral', 'Se repite cada 6 meses', interval '6 months'),
+    ('Anual', 'Se repite cada año', interval '1 year');
+
+-- 1. Primero, crear la jar UNDEFINED
+INSERT INTO public.budget_jar (
+    id,
+    name,
+    description,
+    percentage,
+    user_id
+) VALUES (
+    gen_random_uuid(), -- Genera un UUID aleatorio
+    'UNDEFINED',
+    'Jar por defecto para subcategorías sin jar asignada',
+    0,
+    (SELECT id FROM public.app_user LIMIT 1) -- Asignar a un usuario administrador
+) ON CONFLICT (name) DO NOTHING;
+
+-- Insertar registros UNDEFINED en las tablas necesarias
+INSERT INTO public.category (name, description)
+VALUES ('UNDEFINED', 'Categoría por defecto para transacciones huérfanas');
+
+INSERT INTO public.sub_category (name, description, category_id, budget_jar_id)
+VALUES ('UNDEFINED', 'Subcategoría por defecto para transacciones huérfanas', 
+        (SELECT id FROM public.category WHERE name = 'UNDEFINED'),
+        (SELECT id FROM public.budget_jar WHERE name = 'UNDEFINED'));
+
+INSERT INTO public.transaction_type (name, description)
+VALUES ('UNDEFINED', 'Tipo de transacción por defecto');
+
+INSERT INTO public.transaction_medium (name, description)
+VALUES ('UNDEFINED', 'Medio de transacción por defecto');
