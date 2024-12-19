@@ -1,65 +1,6 @@
--- Tabla de usuarios (integrada con Supabase Auth)
-CREATE TABLE public.app_user (
-    id uuid NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    email text NOT NULL,
-    full_name text NOT NULL,
-    avatar_url text,
-    is_active boolean NOT NULL DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    modified_at timestamptz,
-    CONSTRAINT app_user_email_key UNIQUE (email)
-);
+-- 1. First, system tables that don't depend on other tables
 
--- Política de seguridad RLS (Row Level Security)
-ALTER TABLE public.app_user ENABLE ROW LEVEL SECURITY;
-
--- Políticas para app_user
-CREATE POLICY "Users can view their own profile"
-    ON public.app_user
-    FOR SELECT
-    USING (auth.uid() = id);
-
-CREATE POLICY "Users can update their own profile"
-    ON public.app_user
-    FOR UPDATE
-    USING (auth.uid() = id);
-
-
--- Tabla de organizaciones
-CREATE TABLE public.organization (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    code varchar(20) NOT NULL UNIQUE,
-    name text NOT NULL,
-    description text,
-    is_active boolean NOT NULL DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    modified_at timestamptz,
-    CONSTRAINT organization_name_unique UNIQUE (name),
-    user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE
-);
-
-ALTER TABLE public.organization ENABLE ROW LEVEL SECURITY;
-
--- Create policies for organization
-CREATE POLICY "Users can view their own organizations"
-    ON public.organization FOR SELECT
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their own organizations"
-    ON public.organization FOR UPDATE
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own organizations"
-    ON public.organization FOR INSERT
-    WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own organizations"
-    ON public.organization FOR DELETE
-    USING (auth.uid() = user_id);
-
-
-
--- Tabla de monedas
+-- Currency table and related objects
 CREATE TABLE public.currency (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     code varchar(3) NOT NULL UNIQUE,
@@ -78,7 +19,130 @@ CREATE TABLE public.currency (
     )
 );
 
--- Tabla de jarras de presupuesto
+ALTER TABLE public.currency ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow read access to currency table"
+    ON public.currency FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE INDEX idx_currency_active ON public.currency(id) WHERE is_active = true;
+CREATE INDEX idx_currency_code ON public.currency(code);
+
+-- Transaction Type table and related objects
+CREATE TABLE public.transaction_type (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    name text NOT NULL,
+    description text,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    modified_at timestamptz
+);
+
+ALTER TABLE public.transaction_type ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow read access to transaction_type table"
+    ON public.transaction_type FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE INDEX idx_transaction_type_active ON public.transaction_type(id) WHERE is_active = true;
+
+-- Transaction Medium table (system table)
+CREATE TABLE public.transaction_medium (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    name text NOT NULL,
+    description text,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    modified_at timestamptz
+);
+
+ALTER TABLE public.transaction_medium ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow read access to transaction_medium table"
+    ON public.transaction_medium FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE INDEX idx_transaction_medium_active ON public.transaction_medium(id) WHERE is_active = true;
+
+-- 2. Then tables that depend on auth.users
+
+-- App User table and related objects
+CREATE TABLE public.app_user (
+    id uuid NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email text NOT NULL,
+    full_name text NOT NULL,
+    avatar_url text,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    modified_at timestamptz,
+    CONSTRAINT app_user_email_key UNIQUE (email)
+);
+
+ALTER TABLE public.app_user ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own profile"
+    ON public.app_user FOR SELECT
+    USING (auth.uid() = id);
+
+CREATE POLICY "Users can update their own profile"
+    ON public.app_user FOR UPDATE
+    USING (auth.uid() = id);
+
+CREATE POLICY "Users can insert their own profile"
+    ON public.app_user FOR INSERT
+    WITH CHECK (auth.uid() = id);
+
+CREATE POLICY "Users can delete their own profile"
+    ON public.app_user FOR DELETE
+    USING (auth.uid() = id);
+
+CREATE INDEX idx_app_user_email ON public.app_user(email);
+CREATE INDEX idx_app_user_active ON public.app_user(id) WHERE is_active = true;
+
+-- 3. Then tables that depend on app_user
+
+-- Organization table and related objects
+CREATE TABLE public.organization (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    code varchar(20) NOT NULL UNIQUE,
+    name text NOT NULL,
+    description text,
+    is_active boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    modified_at timestamptz,
+    CONSTRAINT organization_name_unique UNIQUE (name),
+    user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE
+);
+
+ALTER TABLE public.organization ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own organizations"
+    ON public.organization FOR SELECT
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own organizations"
+    ON public.organization FOR UPDATE
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own organizations"
+    ON public.organization FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own organizations"
+    ON public.organization FOR DELETE
+    USING (auth.uid() = user_id);
+
+CREATE INDEX idx_organization_user ON public.organization(user_id);
+CREATE INDEX idx_organization_code ON public.organization(code);
+CREATE INDEX idx_active_organizations ON public.organization(id) WHERE is_active = true;
+
+-- ... continue with other tables in proper dependency order
+
+
+-- Budget Jar table and related objects
 CREATE TABLE public.budget_jar (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name text NOT NULL,
@@ -86,13 +150,18 @@ CREATE TABLE public.budget_jar (
     percentage numeric(5,2) NOT NULL,
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     modified_at timestamptz,
+    user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
+    is_active boolean NOT NULL DEFAULT true,
     CONSTRAINT check_percentage CHECK (percentage >= 0 AND percentage <= 100),
-    user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE
+    CONSTRAINT check_total_percentage CHECK (
+        (SELECT COALESCE(SUM(percentage), 0)
+         FROM public.budget_jar bj2
+         WHERE bj2.user_id = user_id) <= 100
+    )
 );
 
 ALTER TABLE public.budget_jar ENABLE ROW LEVEL SECURITY;
 
--- Create policies for budget_jar
 CREATE POLICY "Users can view their own budget jars"
     ON public.budget_jar FOR SELECT
     USING (auth.uid() = user_id);
@@ -109,8 +178,9 @@ CREATE POLICY "Users can delete their own budget jars"
     ON public.budget_jar FOR DELETE
     USING (auth.uid() = user_id);
 
+CREATE INDEX idx_budget_jar_user ON public.budget_jar(user_id) WHERE is_active = true;
 
--- Tabla de categorías
+-- Category table and related objects
 CREATE TABLE public.category (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name text NOT NULL,
@@ -123,7 +193,6 @@ CREATE TABLE public.category (
 
 ALTER TABLE public.category ENABLE ROW LEVEL SECURITY;
 
--- Create policies for category
 CREATE POLICY "Users can view their own categories"
     ON public.category FOR SELECT
     USING (auth.uid() = user_id);
@@ -140,8 +209,10 @@ CREATE POLICY "Users can delete their own categories"
     ON public.category FOR DELETE
     USING (auth.uid() = user_id);
 
+CREATE INDEX idx_category_user ON public.category(user_id);
+CREATE INDEX idx_category_active ON public.category(id) WHERE is_active = true;
 
--- Tabla de subcategorías
+-- Sub Category table and related objects
 CREATE TABLE public.sub_category (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name text NOT NULL,
@@ -158,8 +229,6 @@ CREATE TABLE public.sub_category (
 
 ALTER TABLE public.sub_category ENABLE ROW LEVEL SECURITY;
 
-
--- Create policies for sub_category
 CREATE POLICY "Users can view their own subcategories"
     ON public.sub_category FOR SELECT
     USING (auth.uid() = user_id);
@@ -176,8 +245,12 @@ CREATE POLICY "Users can delete their own subcategories"
     ON public.sub_category FOR DELETE
     USING (auth.uid() = user_id);
 
+CREATE INDEX idx_sub_category_user ON public.sub_category(user_id);
+CREATE INDEX idx_sub_category_category ON public.sub_category(category_id);
+CREATE INDEX idx_sub_category_budget_jar ON public.sub_category(budget_jar_id);
+CREATE INDEX idx_sub_category_active ON public.sub_category(id) WHERE is_active = true;
 
--- Tabla de histórico de cambios en subcategorías
+-- Sub Category History table and related objects
 CREATE TABLE public.sub_category_history (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     sub_category_id uuid NOT NULL REFERENCES public.sub_category(id) ON DELETE CASCADE,
@@ -188,12 +261,10 @@ CREATE TABLE public.sub_category_history (
     change_date timestamptz DEFAULT CURRENT_TIMESTAMP,
     change_type varchar(20) NOT NULL CHECK (change_type IN ('CATEGORY_CHANGE', 'JAR_CHANGE', 'BOTH')),
     user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
-    is_active boolean NOT NULL DEFAULT true
 );
 
 ALTER TABLE public.sub_category_history ENABLE ROW LEVEL SECURITY;
 
--- Create policies for sub_category_history
 CREATE POLICY "Users can view their own subcategory history"
     ON public.sub_category_history FOR SELECT
     USING (auth.uid() = user_id);
@@ -210,30 +281,13 @@ CREATE POLICY "Users can delete their own subcategory history"
     ON public.sub_category_history FOR DELETE
     USING (auth.uid() = user_id);
 
+CREATE INDEX idx_sub_category_history_subcategory ON public.sub_category_history(sub_category_id);
+CREATE INDEX idx_sub_category_history_user ON public.sub_category_history(user_id);
+CREATE INDEX idx_sub_category_history_date ON public.sub_category_history(change_date);
+CREATE INDEX idx_sub_category_history_change_type ON public.sub_category_history(change_type);
 
 
-
--- Tabla de tipos de transacción
-CREATE TABLE public.transaction_type (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    name text NOT NULL,
-    description text,
-    is_active boolean NOT NULL DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    modified_at timestamptz
-);
-
--- Tabla de medios de transacción
-CREATE TABLE public.transaction_medium (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    name text NOT NULL,
-    description text,
-    is_active boolean NOT NULL DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    modified_at timestamptz
-);
-
--- Tabla de cuentas
+-- Account table and related objects
 CREATE TABLE public.account (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name text NOT NULL,
@@ -249,7 +303,6 @@ CREATE TABLE public.account (
 
 ALTER TABLE public.account ENABLE ROW LEVEL SECURITY;
 
--- Create policies for account
 CREATE POLICY "Users can view their own accounts"
     ON public.account FOR SELECT
     USING (auth.uid() = user_id);
@@ -266,7 +319,11 @@ CREATE POLICY "Users can delete their own accounts"
     ON public.account FOR DELETE
     USING (auth.uid() = user_id);
 
--- Tabla de períodos
+CREATE INDEX idx_account_user ON public.account(user_id);
+CREATE INDEX idx_account_currency ON public.account(currency_id);
+CREATE INDEX idx_active_accounts ON public.account(id) WHERE is_active = true;
+
+-- Period table and related objects
 CREATE TABLE public.period (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     start_date date NOT NULL,
@@ -274,14 +331,13 @@ CREATE TABLE public.period (
     name text NOT NULL,
     is_closed boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT check_period_dates CHECK (end_date >= start_date),
     user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
-    is_active boolean NOT NULL DEFAULT true
+    is_active boolean NOT NULL DEFAULT true,
+    CONSTRAINT check_period_dates CHECK (end_date >= start_date)
 );
 
 ALTER TABLE public.period ENABLE ROW LEVEL SECURITY;
 
--- Create policies for period
 CREATE POLICY "Users can view their own periods"
     ON public.period FOR SELECT
     USING (auth.uid() = user_id);
@@ -298,23 +354,25 @@ CREATE POLICY "Users can delete their own periods"
     ON public.period FOR DELETE
     USING (auth.uid() = user_id);
 
--- Tabla de ingresos por período
+CREATE INDEX idx_period_user ON public.period(user_id);
+CREATE INDEX idx_period_dates ON public.period(start_date, end_date);
+CREATE INDEX idx_active_periods ON public.period(id) WHERE is_active = true;
+
+-- Period Income table and related objects
 CREATE TABLE public.period_income (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     period_id uuid NOT NULL REFERENCES public.period(id) ON DELETE CASCADE,
     total_income numeric(15,2) NOT NULL,
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     modified_at timestamptz,
-    CONSTRAINT unique_period_income UNIQUE (period_id),
-    CONSTRAINT check_income_positive CHECK (total_income >= 0),
     user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
-    is_active boolean NOT NULL DEFAULT true
+    is_active boolean NOT NULL DEFAULT true,
+    CONSTRAINT unique_period_income UNIQUE (period_id),
+    CONSTRAINT check_income_positive CHECK (total_income >= 0)
 );
 
 ALTER TABLE public.period_income ENABLE ROW LEVEL SECURITY;
 
-
--- Create policies for period_income
 CREATE POLICY "Users can view their own period incomes"
     ON public.period_income FOR SELECT
     USING (auth.uid() = user_id);
@@ -331,23 +389,24 @@ CREATE POLICY "Users can delete their own period incomes"
     ON public.period_income FOR DELETE
     USING (auth.uid() = user_id);
 
--- Tabla de presupuestos por jarra y período
+CREATE INDEX idx_period_income_user ON public.period_income(user_id);
+CREATE INDEX idx_period_income_period ON public.period_income(period_id);
+
+-- Jar Period Budget table and related objects
 CREATE TABLE public.jar_period_budget (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     period_id uuid NOT NULL REFERENCES public.period(id) ON DELETE CASCADE,
     budget_jar_id uuid NOT NULL REFERENCES public.budget_jar(id) ON DELETE CASCADE,
     calculated_amount numeric(15,2) NOT NULL,
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT unique_jar_period UNIQUE (period_id, budget_jar_id),
-    CONSTRAINT check_amount_positive CHECK (calculated_amount >= 0),
     user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
-    is_active boolean NOT NULL DEFAULT true
+    is_active boolean NOT NULL DEFAULT true,
+    CONSTRAINT unique_jar_period UNIQUE (period_id, budget_jar_id),
+    CONSTRAINT check_amount_positive CHECK (calculated_amount >= 0)
 );
 
 ALTER TABLE public.jar_period_budget ENABLE ROW LEVEL SECURITY;
 
-
--- Create policies for jar_period_budget
 CREATE POLICY "Users can view their own jar period budgets"
     ON public.jar_period_budget FOR SELECT
     USING (auth.uid() = user_id);
@@ -364,36 +423,33 @@ CREATE POLICY "Users can delete their own jar period budgets"
     ON public.jar_period_budget FOR DELETE
     USING (auth.uid() = user_id);
 
--- Tabla de transacciones (simplified, only actual transaction data)
-CREATE TABLE public.transaction (
+CREATE INDEX idx_jar_period_budget_user ON public.jar_period_budget(user_id);
+CREATE INDEX idx_jar_period_budget_period ON public.jar_period_budget(period_id);
+CREATE INDEX idx_jar_period_budget_jar ON public.jar_period_budget(budget_jar_id);
+
+-- Recurrence Frequency table (system table)
+CREATE TABLE public.recurrence_frequency (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    registered_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    date date NOT NULL,
-    amount numeric(15, 2) NOT NULL,
-    currency_id uuid NOT NULL DEFAULT (SELECT id FROM public.currency WHERE code = 'UND')
-        REFERENCES public.currency(id) ON DELETE SET DEFAULT,
-    organization_id uuid NOT NULL DEFAULT (SELECT id FROM public.organization WHERE code = 'UND')
-        REFERENCES public.organization(id) ON DELETE SET DEFAULT,
-    tags jsonb,
-    notes text,
-    reference varchar(100),
-    category uuid NOT NULL DEFAULT (SELECT id FROM public.category WHERE name = 'UNDEFINED')
-        REFERENCES public.category(id) ON DELETE SET DEFAULT,
-    sub_category uuid NOT NULL DEFAULT (SELECT id FROM public.sub_category WHERE name = 'UNDEFINED')
-        REFERENCES public.sub_category(id) ON DELETE SET DEFAULT,
-    account uuid NOT NULL REFERENCES public.account(id) ON DELETE CASCADE,
-    transaction_type uuid NOT NULL DEFAULT (SELECT id FROM public.transaction_type WHERE name = 'UNDEFINED')
-        REFERENCES public.transaction_type(id) ON DELETE SET DEFAULT,
-    transaction_medium uuid DEFAULT (SELECT id FROM public.transaction_medium WHERE name = 'UNDEFINED')
-        REFERENCES public.transaction_medium(id) ON DELETE SET DEFAULT,
-    is_expense boolean NOT NULL DEFAULT true,
-    user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
-    is_foreign_currency boolean NOT NULL DEFAULT false,
-    template_id uuid,  -- Will be set after template table is created
-    CONSTRAINT check_amount_not_zero CHECK (amount != 0)
+    name text NOT NULL,
+    description text,
+    interval_value interval NOT NULL,
+    is_active boolean DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    modified_at timestamptz
 );
 
--- Create recurrent transaction template table
+ALTER TABLE public.recurrence_frequency ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow read access to recurrence_frequency table"
+    ON public.recurrence_frequency FOR SELECT
+    TO authenticated
+    USING (true);
+
+CREATE INDEX idx_recurrence_frequency_active ON public.recurrence_frequency(id) WHERE is_active = true;
+
+
+
+-- Recurrent Transaction Template table
 CREATE TABLE public.recurrent_transaction_template (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     description text,
@@ -433,7 +489,88 @@ CREATE TABLE public.recurrent_transaction_template (
     CONSTRAINT check_payment_day CHECK (payment_day BETWEEN 1 AND 31)
 );
 
--- Create recurrence execution tracking table
+ALTER TABLE public.recurrent_transaction_template ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own recurrent transaction templates"
+    ON public.recurrent_transaction_template FOR SELECT
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own recurrent transaction templates"
+    ON public.recurrent_transaction_template FOR UPDATE
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own recurrent transaction templates"
+    ON public.recurrent_transaction_template FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own recurrent transaction templates"
+    ON public.recurrent_transaction_template FOR DELETE
+    USING (auth.uid() = user_id);
+
+CREATE INDEX idx_template_user ON public.recurrent_transaction_template(user_id);
+CREATE INDEX idx_template_next_execution ON public.recurrent_transaction_template(next_execution_date);
+CREATE INDEX idx_template_status ON public.recurrent_transaction_template(status);
+CREATE INDEX idx_active_templates ON public.recurrent_transaction_template(next_execution_date) 
+    WHERE status = 'ACTIVE';
+
+-- Transaction table
+CREATE TABLE public.transaction (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    registered_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    date date NOT NULL,
+    amount numeric(15, 2) NOT NULL,
+    currency_id uuid NOT NULL DEFAULT (SELECT id FROM public.currency WHERE code = 'UND')
+        REFERENCES public.currency(id) ON DELETE SET DEFAULT,
+    organization_id uuid NOT NULL DEFAULT (SELECT id FROM public.organization WHERE code = 'UND')
+        REFERENCES public.organization(id) ON DELETE SET DEFAULT,
+    tags jsonb,
+    notes text,
+    reference varchar(100),
+    category uuid NOT NULL DEFAULT (SELECT id FROM public.category WHERE name = 'UNDEFINED')
+        REFERENCES public.category(id) ON DELETE SET DEFAULT,
+    sub_category uuid NOT NULL DEFAULT (SELECT id FROM public.sub_category WHERE name = 'UNDEFINED')
+        REFERENCES public.sub_category(id) ON DELETE SET DEFAULT,
+    account uuid NOT NULL REFERENCES public.account(id) ON DELETE CASCADE,
+    transaction_type uuid NOT NULL DEFAULT (SELECT id FROM public.transaction_type WHERE name = 'UNDEFINED')
+        REFERENCES public.transaction_type(id) ON DELETE SET DEFAULT,
+    transaction_medium uuid DEFAULT (SELECT id FROM public.transaction_medium WHERE name = 'UNDEFINED')
+        REFERENCES public.transaction_medium(id) ON DELETE SET DEFAULT,
+    is_expense boolean NOT NULL DEFAULT true,
+    user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
+    is_foreign_currency boolean NOT NULL DEFAULT false,
+    template_id uuid REFERENCES public.recurrent_transaction_template(id),
+    CONSTRAINT check_amount_not_zero CHECK (amount != 0),
+    CONSTRAINT check_transaction_date CHECK (date <= CURRENT_DATE)
+);
+
+ALTER TABLE public.transaction ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can view their own transactions"
+    ON public.transaction FOR SELECT
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own transactions"
+    ON public.transaction FOR UPDATE
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own transactions"
+    ON public.transaction FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own transactions"
+    ON public.transaction FOR DELETE
+    USING (auth.uid() = user_id);
+
+CREATE INDEX idx_transaction_user ON public.transaction(user_id);
+CREATE INDEX idx_transaction_date ON public.transaction(date);
+CREATE INDEX idx_transaction_account ON public.transaction(account);
+CREATE INDEX idx_transaction_category ON public.transaction(category);
+CREATE INDEX idx_transaction_sub_category ON public.transaction(sub_category);
+CREATE INDEX idx_transaction_template ON public.transaction(template_id);
+CREATE INDEX idx_transaction_organization ON public.transaction(organization_id);
+CREATE INDEX idx_expense_transactions ON public.transaction(date, amount) WHERE is_expense = true;
+
+-- Recurrence Execution table
 CREATE TABLE public.recurrence_execution (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     transaction_id uuid NOT NULL REFERENCES public.transaction(id) ON DELETE CASCADE,
@@ -453,52 +590,8 @@ CREATE TABLE public.recurrence_execution (
     CONSTRAINT unique_template_execution UNIQUE (template_id, execution_number)
 );
 
--- Add foreign key constraint to transaction table
-ALTER TABLE public.transaction 
-    ADD CONSTRAINT fk_transaction_template 
-    FOREIGN KEY (template_id) 
-    REFERENCES public.recurrent_transaction_template(id);
-
--- Enable RLS for all tables
-ALTER TABLE public.transaction ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.recurrent_transaction_template ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recurrence_execution ENABLE ROW LEVEL SECURITY;
 
--- Create policies for transaction
-CREATE POLICY "Users can view their own transactions"
-    ON public.transaction FOR SELECT
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their own transactions"
-    ON public.transaction FOR UPDATE
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own transactions"
-    ON public.transaction FOR INSERT
-    WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own transactions"
-    ON public.transaction FOR DELETE
-    USING (auth.uid() = user_id);
-
--- Create policies for recurrent_transaction_template
-CREATE POLICY "Users can view their own recurrent transaction templates"
-    ON public.recurrent_transaction_template FOR SELECT
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can update their own recurrent transaction templates"
-    ON public.recurrent_transaction_template FOR UPDATE
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own recurrent transaction templates"
-    ON public.recurrent_transaction_template FOR INSERT
-    WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own recurrent transaction templates"
-    ON public.recurrent_transaction_template FOR DELETE
-    USING (auth.uid() = user_id);
-
--- Create policies for recurrence_execution
 CREATE POLICY "Users can view their own recurrence executions"
     ON public.recurrence_execution FOR SELECT
     USING (auth.uid() = user_id);
@@ -507,99 +600,12 @@ CREATE POLICY "Users can insert their own recurrence executions"
     ON public.recurrence_execution FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update their own recurrence executions"
-    ON public.recurrence_execution FOR UPDATE
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete their own recurrence executions"
-    ON public.recurrence_execution FOR DELETE
-    USING (auth.uid() = user_id);
-
--- Create indexes for transaction
-CREATE INDEX idx_transaction_organization_id ON public.transaction(organization_id);
-CREATE INDEX idx_transaction_date ON public.transaction(date);
-CREATE INDEX idx_transaction_user_id ON public.transaction(user_id);
-CREATE INDEX idx_transaction_account ON public.transaction(account);
-CREATE INDEX idx_transaction_category ON public.transaction(category);
-CREATE INDEX idx_transaction_sub_category ON public.transaction(sub_category);
-CREATE INDEX idx_transaction_template_id ON public.transaction(template_id);
-
--- Create indexes for recurrent_transaction_template
-CREATE INDEX idx_template_user_id ON public.recurrent_transaction_template(user_id);
-CREATE INDEX idx_template_next_execution ON public.recurrent_transaction_template(next_execution_date);
-CREATE INDEX idx_template_status ON public.recurrent_transaction_template(status);
-
--- Create indexes for recurrence_execution
 CREATE INDEX idx_recurrence_execution_template ON public.recurrence_execution(template_id);
 CREATE INDEX idx_recurrence_execution_transaction ON public.recurrence_execution(transaction_id);
 CREATE INDEX idx_recurrence_execution_date ON public.recurrence_execution(execution_date);
 CREATE INDEX idx_recurrence_execution_user ON public.recurrence_execution(user_id);
 
-
--- Tabla de histórico de cambios en transacciones
-CREATE TABLE public.transaction_history (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    transaction_id uuid NOT NULL REFERENCES public.transaction(id) ON DELETE CASCADE,
-    change_date timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    change_type varchar(20) NOT NULL CHECK (
-        change_type IN (
-            'CURRENCY', 
-            'ORGANIZATION', 
-            'CATEGORY', 
-            'SUBCATEGORY', 
-            'ACCOUNT', 
-            'TRANSACTION_TYPE', 
-            'TRANSACTION_MEDIUM'
-        )
-    ),
-    -- Campos para cambios en moneda
-    old_currency_id uuid REFERENCES public.currency(id) ON DELETE SET NULL,
-    new_currency_id uuid REFERENCES public.currency(id) ON DELETE SET NULL,
-    -- Campos para cambios en organización
-    old_organization_id uuid REFERENCES public.organization(id) ON DELETE SET NULL,
-    new_organization_id uuid REFERENCES public.organization(id) ON DELETE SET NULL,
-    -- Campos para cambios en categoría
-    old_category_id uuid REFERENCES public.category(id) ON DELETE SET NULL,
-    new_category_id uuid REFERENCES public.category(id) ON DELETE SET NULL,
-    -- Campos para cambios en subcategoría
-    old_subcategory_id uuid REFERENCES public.sub_category(id) ON DELETE SET NULL,
-    new_subcategory_id uuid REFERENCES public.sub_category(id) ON DELETE SET NULL,
-    -- Campos para cambios en cuenta
-    old_account_id uuid REFERENCES public.account(id) ON DELETE SET NULL,
-    new_account_id uuid REFERENCES public.account(id) ON DELETE SET NULL,
-    -- Campos para cambios en tipo de transacción
-    old_transaction_type_id uuid REFERENCES public.transaction_type(id) ON DELETE SET NULL,
-    new_transaction_type_id uuid REFERENCES public.transaction_type(id) ON DELETE SET NULL,
-    -- Campos para cambios en medio de transacción
-    old_transaction_medium_id uuid REFERENCES public.transaction_medium(id) ON DELETE SET NULL,
-    new_transaction_medium_id uuid REFERENCES public.transaction_medium(id) ON DELETE SET NULL,
-    -- Usuario que realizó el cambio
-    user_id uuid NOT NULL REFERENCES public.app_user(id) ON DELETE CASCADE,
-    notes text
-);
-
-ALTER TABLE public.transaction_history ENABLE ROW LEVEL SECURITY;
-
-
--- Create policies for transaction_history
-CREATE POLICY "Users can view their own transaction history"
-    ON public.transaction_history FOR SELECT
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own transaction history"
-    ON public.transaction_history FOR INSERT
-    WITH CHECK (auth.uid() = user_id);
-
--- Create policies for account_transfer
-CREATE POLICY "Users can view their own account transfers"
-    ON public.account_transfer FOR SELECT
-    USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert their own account transfers"
-    ON public.account_transfer FOR INSERT
-    WITH CHECK (auth.uid() = user_id);
-
--- Tabla para manejar transferencias entre cuentas
+-- Account Transfer table
 CREATE TABLE public.account_transfer (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     amount numeric(15,2) NOT NULL,
@@ -620,7 +626,21 @@ CREATE TABLE public.account_transfer (
 
 ALTER TABLE public.account_transfer ENABLE ROW LEVEL SECURITY;
 
--- Tabla de auditoría para transferencias entre cuentas
+CREATE POLICY "Users can view their own account transfers"
+    ON public.account_transfer FOR SELECT
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own account transfers"
+    ON public.account_transfer FOR INSERT
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE INDEX idx_account_transfer_from ON public.account_transfer(from_account_id);
+CREATE INDEX idx_account_transfer_to ON public.account_transfer(to_account_id);
+CREATE INDEX idx_account_transfer_transaction ON public.account_transfer(transaction_id);
+CREATE INDEX idx_account_transfer_date ON public.account_transfer(transfer_date);
+CREATE INDEX idx_account_transfer_user ON public.account_transfer(user_id);
+
+-- Account Transfer History table
 CREATE TABLE public.account_transfer_history (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     transfer_id uuid NOT NULL REFERENCES public.account_transfer(id) ON DELETE CASCADE,
@@ -638,7 +658,6 @@ CREATE TABLE public.account_transfer_history (
 
 ALTER TABLE public.account_transfer_history ENABLE ROW LEVEL SECURITY;
 
--- Create policies for account_transfer_history
 CREATE POLICY "Users can view their own transfer history"
     ON public.account_transfer_history FOR SELECT
     USING (auth.uid() = user_id);
@@ -647,7 +666,11 @@ CREATE POLICY "Users can insert their own transfer history"
     ON public.account_transfer_history FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
--- Tabla para registrar transacciones en moneda extranjera
+CREATE INDEX idx_account_transfer_history_transfer ON public.account_transfer_history(transfer_id);
+CREATE INDEX idx_account_transfer_history_date ON public.account_transfer_history(change_date);
+CREATE INDEX idx_account_transfer_history_user ON public.account_transfer_history(user_id);
+
+-- Foreign Currency Transaction table
 CREATE TABLE public.foreign_currency_transaction (
     id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     transaction_id uuid NOT NULL REFERENCES public.transaction(id) ON DELETE CASCADE,
@@ -663,7 +686,6 @@ CREATE TABLE public.foreign_currency_transaction (
 
 ALTER TABLE public.foreign_currency_transaction ENABLE ROW LEVEL SECURITY;
 
--- Create policies for foreign_currency_transaction
 CREATE POLICY "Users can view their own foreign currency transactions"
     ON public.foreign_currency_transaction FOR SELECT
     USING (EXISTS (
@@ -680,80 +702,63 @@ CREATE POLICY "Users can insert their own foreign currency transactions"
         AND t.user_id = auth.uid()
     ));
 
--- Tabla para frecuencias de recurrencia
-CREATE TABLE public.recurrence_frequency (
-    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
-    name text NOT NULL,
-    description text,
-    interval_value interval NOT NULL,
-    is_active boolean DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    modified_at timestamptz
-);
+CREATE INDEX idx_foreign_currency_transaction_transaction ON public.foreign_currency_transaction(transaction_id);
+CREATE INDEX idx_foreign_currency_transaction_currency ON public.foreign_currency_transaction(original_currency_id);
+CREATE INDEX idx_foreign_currency_transaction_date ON public.foreign_currency_transaction(transaction_date);
 
--- Crear índices
-CREATE INDEX idx_transaction_organization_id ON public.transaction(organization_id);
-CREATE INDEX idx_transaction_date ON public.transaction(date);
-CREATE INDEX idx_transaction_user_id ON public.transaction(user_id);
-CREATE INDEX idx_transaction_account ON public.transaction(account);
-CREATE INDEX idx_transaction_category ON public.transaction(category);
-CREATE INDEX idx_transaction_sub_category ON public.transaction(sub_category);
-CREATE INDEX idx_transaction_is_recurrent ON public.transaction(is_recurrent);
-CREATE INDEX idx_transaction_recurrence_group ON public.transaction(recurrence_group_id);
-CREATE INDEX idx_transaction_next_execution ON public.transaction(next_execution_date) 
-    WHERE is_recurrent = true;
+-- Create function to update modified_at timestamp
+CREATE OR REPLACE FUNCTION update_modified_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.modified_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Apply trigger to all tables with modified_at column
+CREATE TRIGGER update_app_user_modtime
+    BEFORE UPDATE ON public.app_user
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
+
+CREATE TRIGGER update_organization_modtime
+    BEFORE UPDATE ON public.organization
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
+
+CREATE TRIGGER update_currency_modtime
+    BEFORE UPDATE ON public.currency
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
+
+CREATE TRIGGER update_budget_jar_modtime
+    BEFORE UPDATE ON public.budget_jar
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
+
+CREATE TRIGGER update_category_modtime
+    BEFORE UPDATE ON public.category
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
+
+CREATE TRIGGER update_sub_category_modtime
+    BEFORE UPDATE ON public.sub_category
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
+
+CREATE TRIGGER update_account_modtime
+    BEFORE UPDATE ON public.account
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
+
+CREATE TRIGGER update_period_income_modtime
+    BEFORE UPDATE ON public.period_income
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
+
+CREATE TRIGGER update_recurrent_transaction_template_modtime
+    BEFORE UPDATE ON public.recurrent_transaction_template
+    FOR EACH ROW
+    EXECUTE FUNCTION update_modified_at_column();
 
 
-
-
--- Crear índices para mejorar el rendimiento de las consultas
-CREATE INDEX idx_transaction_history_transaction_id 
-    ON public.transaction_history(transaction_id);
-CREATE INDEX idx_transaction_history_change_date 
-    ON public.transaction_history(change_date);
-CREATE INDEX idx_transaction_history_change_type 
-    ON public.transaction_history(change_type);
-CREATE INDEX idx_transaction_history_user_id 
-    ON public.transaction_history(user_id);
-
-
--- Índices para mejorar el rendimiento
-CREATE INDEX idx_account_transfer_from_account 
-    ON public.account_transfer(from_account_id);
-CREATE INDEX idx_account_transfer_to_account 
-    ON public.account_transfer(to_account_id);
-CREATE INDEX idx_account_transfer_date 
-    ON public.account_transfer(transfer_date);
-CREATE INDEX idx_account_transfer_user 
-    ON public.account_transfer(user_id);
-
--- First drop the index
-DROP INDEX IF EXISTS idx_transaction_recurrence_group;
-
--- Remove the foreign key column from transaction table
-ALTER TABLE public.transaction 
-DROP COLUMN IF EXISTS recurrence_group_id,
-DROP COLUMN IF EXISTS is_recurrent; -- This column is also obsolete with the new structure
-
--- Remove the recurrence_group table and its policies
-DROP POLICY IF EXISTS "Users can view their own recurrence groups" ON public.recurrence_group;
-DROP POLICY IF EXISTS "Users can update their own recurrence groups" ON public.recurrence_group;
-DROP POLICY IF EXISTS "Users can insert their own recurrence groups" ON public.recurrence_group;
-DROP POLICY IF EXISTS "Users can delete their own recurrence groups" ON public.recurrence_group;
-
-DROP TABLE IF EXISTS public.recurrence_group;
-
--- Add partial index for active organizations
-CREATE INDEX idx_active_organizations 
-ON public.organization(id) 
-WHERE is_active = true;
-
--- Add partial index for active accounts
-CREATE INDEX idx_active_accounts 
-ON public.account(id) 
-WHERE is_active = true;
-
--- Add partial index for expense transactions
-CREATE INDEX idx_expense_transactions 
-ON public.transaction(date, amount) 
-WHERE is_expense = true;
